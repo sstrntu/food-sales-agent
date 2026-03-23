@@ -45,7 +45,7 @@ function inlineBold(text) {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i} style={{ color: '#e4e6ed', fontWeight: 600 }}>{part.slice(2, -2)}</strong>;
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
     }
     return part;
   });
@@ -73,11 +73,11 @@ export default function ChatView({ rep, messages, thinking, error, onSend }) {
       <div className="chat-area">
         <div className="empty-state">
           <div className="empty-orb">
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-              <circle cx="20" cy="20" r="16" stroke="rgba(129,140,248,.35)" strokeWidth="1.5"/>
-              <path d="M14 25c0 0 3 3.5 6 3.5s6-3.5 6-3.5" stroke="rgba(129,140,248,.5)" strokeWidth="1.5" strokeLinecap="round"/>
-              <circle cx="15" cy="17" r="1.5" fill="rgba(129,140,248,.5)"/>
-              <circle cx="25" cy="17" r="1.5" fill="rgba(129,140,248,.5)"/>
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="20" stroke="rgba(212,145,92,.25)" strokeWidth="1.5"/>
+              <circle cx="24" cy="24" r="13" stroke="rgba(212,145,92,.15)" strokeWidth="1"/>
+              <circle cx="24" cy="24" r="5" fill="rgba(212,145,92,.3)"/>
+              <circle cx="24" cy="24" r="2" fill="rgba(232,168,73,.6)"/>
             </svg>
           </div>
           <div className="empty-title">Hey {rep.name.split(' ')[0]}, ready when you are</div>

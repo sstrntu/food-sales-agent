@@ -35,7 +35,7 @@ export default function Dashboard({ rep }) {
           )}
           {overdue.map((a, i) => (
             <div key={i} className="ar-row">
-              <div className="ar-dot" style={{ background: '#fbbf24' }} />
+              <div className="ar-dot" style={{ background: '#dba54e' }} />
               <div className="ar-info">
                 <div className="ar-name">{a.name}</div>
                 <div className="ar-detail">{a.daysPastDue}d overdue &middot; ${a.overdueAmount}</div>
@@ -44,7 +44,7 @@ export default function Dashboard({ rep }) {
           ))}
           {flagged.map((a, i) => (
             <div key={i} className="ar-row">
-              <div className="ar-dot" style={{ background: '#f87171' }} />
+              <div className="ar-dot" style={{ background: '#d46b6b' }} />
               <div className="ar-info">
                 <div className="ar-name">{a.name}</div>
                 <div className="ar-detail">Flagged &middot; ${a.totalOutstanding} outstanding</div>
