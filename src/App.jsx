@@ -18,6 +18,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [view, setView] = useState("chat");
   const [tick, setTick] = useState(0);
+  const [showStorePicker, setShowStorePicker] = useState(false);
 
   const historyRef = useRef([]);
   const rep = REPS[repId];
@@ -103,10 +104,33 @@ export default function App() {
             <path d="M3.5 5.5L7 9L10.5 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
           </svg>
         </div>
-        <div className="tab-group">
-          <button className={`tab-btn ${view === 'chat' ? 'active' : ''}`} onClick={() => setView('chat')}>Chat</button>
-          <button className={`tab-btn ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>Stats</button>
-        </div>
+        {messages.length > 0 && (
+          <button className="new-chat-btn" onClick={() => { setMessages([]); historyRef.current = []; setError(""); stopSpeaking(); setSpeaking(false); setView('chat'); }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M13.5 2.5l-11 11M8 2.5h5.5V8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            <span>New Chat</span>
+          </button>
+        )}
+      </div>
+
+      {/* View Toggle */}
+      <div className="view-toggle">
+        <button className={`view-tab ${view === 'chat' ? 'active' : ''}`} onClick={() => setView('chat')}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M3 4.5C3 3.67 3.67 3 4.5 3h9c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5H6.5L3 16V4.5z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span className="view-tab-label">Chat</span>
+        </button>
+        <button className={`view-tab ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <rect x="2" y="2" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.5"/>
+            <rect x="10.5" y="2" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.5"/>
+            <rect x="2" y="10.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.5"/>
+            <rect x="10.5" y="10.5" width="5.5" height="5.5" rx="1.2" stroke="currentColor" strokeWidth="1.5"/>
+          </svg>
+          <span className="view-tab-label">Dashboard</span>
+        </button>
       </div>
 
       {/* Rep Dropdown */}
@@ -179,9 +203,37 @@ export default function App() {
         {messages.length > 0 && view === 'chat' && (
           <div className="chip-scroll">
             {QUICK_PROMPTS.map((q, i) => (
-              <button key={i} className="chip" onClick={() => handleSend(q.text)}>{q.label}</button>
+              <button key={i} className="chip" onClick={() => {
+                if (q.needsStore) setShowStorePicker(true);
+                else handleSend(q.text);
+              }}>{q.label}</button>
             ))}
           </div>
+        )}
+        {showStorePicker && (
+          <>
+            <div className="overlay" onClick={() => setShowStorePicker(false)} />
+            <div className="store-picker">
+              <div className="store-picker-title">Where are you heading?</div>
+              <div className="store-picker-list">
+                {rep.accounts.map((a, i) => (
+                  <button key={i} className="store-picker-item" onClick={() => {
+                    setShowStorePicker(false);
+                    handleSend(`I'm heading to ${a.name} now. Give me a quick briefing — what do I need to know before I walk in? Any AR issues, recent order history, items to push, or promos I should mention?`);
+                  }}>
+                    <div className="tier-badge">{a.tier}</div>
+                    <div className="store-picker-info">
+                      <div className="store-picker-name">{a.name}</div>
+                      <div className="store-picker-detail">Last order {a.lastOrder}</div>
+                    </div>
+                    <div className={`store-picker-status ${a.arStatus === 'current' ? 'c-green' : a.arStatus === 'overdue' ? 'c-yellow' : 'c-red'}`}>
+                      {a.arStatus}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
         )}
         <div className="input-row">
           <input
