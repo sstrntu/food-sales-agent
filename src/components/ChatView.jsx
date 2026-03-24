@@ -19,7 +19,7 @@ function renderMarkdown(text) {
       elements.push(
         <ul key={elements.length} style={{ margin: '4px 0', paddingLeft: 18 }}>
           {items.map((item, j) => (
-            <li key={j} style={{ marginBottom: 2 }}>{inlineBold(item)}</li>
+            <li key={j} style={{ marginBottom: 2 }}>{inlineFormat(item)}</li>
           ))}
         </ul>
       );
@@ -34,18 +34,27 @@ function renderMarkdown(text) {
     }
 
     // Regular text line
-    elements.push(<div key={elements.length}>{inlineBold(line)}</div>);
+    elements.push(<div key={elements.length}>{inlineFormat(line)}</div>);
     i++;
   }
 
   return elements;
 }
 
-function inlineBold(text) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+function inlineFormat(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*|\[[-+~][^\]]+[-+~]\])/g);
   return parts.map((part, i) => {
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('[+') && part.endsWith('+]')) {
+      return <span key={i} className="val-good">{part.slice(2, -2)}</span>;
+    }
+    if (part.startsWith('[-') && part.endsWith('-]')) {
+      return <span key={i} className="val-bad">{part.slice(2, -2)}</span>;
+    }
+    if (part.startsWith('[~') && part.endsWith('~]')) {
+      return <span key={i} className="val-warn">{part.slice(2, -2)}</span>;
     }
     return part;
   });
@@ -127,10 +136,10 @@ export default function ChatView({ rep, messages, thinking, error, onSend }) {
         <div className="empty-state">
           <div className="empty-orb">
             <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <circle cx="24" cy="24" r="20" stroke="rgba(212,145,92,.25)" strokeWidth="1.5"/>
-              <circle cx="24" cy="24" r="13" stroke="rgba(212,145,92,.15)" strokeWidth="1"/>
-              <circle cx="24" cy="24" r="5" fill="rgba(212,145,92,.3)"/>
-              <circle cx="24" cy="24" r="2" fill="rgba(232,168,73,.6)"/>
+              <circle cx="24" cy="24" r="20" stroke="rgba(0,0,0,.15)" strokeWidth="1.5"/>
+              <circle cx="24" cy="24" r="13" stroke="rgba(0,0,0,.08)" strokeWidth="1"/>
+              <circle cx="24" cy="24" r="5" fill="rgba(0,0,0,.15)"/>
+              <circle cx="24" cy="24" r="2" fill="rgba(0,0,0,.4)"/>
             </svg>
           </div>
           <div className="empty-title">Hey {rep.name.split(' ')[0]}, ready when you are</div>

@@ -24,6 +24,12 @@ PERSONALITY & TONE:
 - Use bullet points (- or •) to list accounts, items, or action steps
 - Use **bold** for key numbers, account names, and important highlights
 - Use short labeled lines like "**Gap:** $2,380/day" when presenting numbers
+- COLOR TAG key values using these exact wrappers (no spaces inside):
+  [+value+] = good/positive (on track, projected above target, paid on time, high velocity)
+  [~value~] = warning/neutral (approaching deadline, moderate gap, due soon)
+  [-value-] = bad/urgent (overdue, flagged, below pace, expiring soon)
+  Example: "You're at [+$48.2k+] of your $72k target. Gap is [~$23.8k~] with [-10 days left-]."
+  Only tag numbers and short phrases — not whole sentences.
 - Group related info into short paragraphs separated by blank lines
 - NO emojis
 
