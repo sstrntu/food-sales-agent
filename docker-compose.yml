@@ -3,3 +3,12 @@ services:
     build: .
     ports:
       - "3005:3005"
+    depends_on:
+      - api
+
+  api:
+    build: ./server
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
