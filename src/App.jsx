@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { REPS } from './data/reps';
+import { loadReps } from './data/reps';
 import { callClaude, isKeyConfigured } from './services/claude';
 import { speak, stopSpeaking, isVoiceConfigured } from './services/elevenlabs';
 import { useSpeechRecognition } from './hooks/useSpeechRecognition';
@@ -9,6 +9,8 @@ import './styles.css';
 
 export default function App() {
   const [repId, setRepId] = useState("jimmy");
+  const [repsData, setRepsData] = useState(null);
+  const [dataLoading, setDataLoading] = useState(true);
   const [messages, setMessages] = useState([]);
   const [speaking_, setSpeaking] = useState(false);
   const [thinking, setThinking] = useState(false);
@@ -22,9 +24,17 @@ export default function App() {
   const [storePickerMode, setStorePickerMode] = useState("visit");
 
   const historyRef = useRef([]);
-  const rep = REPS[repId];
-  const gap = rep.monthlyTarget - rep.mtdSales;
-  const pct = Math.round((rep.mtdSales / rep.monthlyTarget) * 100);
+
+  // Load all rep data from Supabase on mount
+  useEffect(() => {
+    loadReps()
+      .then(data => { setRepsData(data); setDataLoading(false); })
+      .catch(err => { setError('Failed to load data: ' + err.message); setDataLoading(false); });
+  }, []);
+
+  const rep = repsData?.[repId];
+  const gap = rep ? rep.monthlyTarget - rep.mtdSales : 0;
+  const pct = rep ? Math.round((rep.mtdSales / rep.monthlyTarget) * 100) : 0;
 
   // Reset on rep switch
   useEffect(() => {
@@ -91,6 +101,24 @@ export default function App() {
   // Pulse value for animations
   const pulseMag = Math.sin(tick * 0.1) * 0.5 + 0.5;
 
+  // Loading screen while Supabase data loads
+  if (dataLoading || !rep) {
+    return (
+      <div className="shell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style={{ marginBottom: 12, opacity: 0.4 }}>
+            <circle cx="18" cy="18" r="15" stroke="currentColor" strokeWidth="2" strokeDasharray="70" strokeDashoffset="20">
+              <animateTransform attributeName="transform" type="rotate" from="0 18 18" to="360 18 18" dur="1s" repeatCount="indefinite"/>
+            </circle>
+          </svg>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>
+            {error ? error : 'Loading data...'}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="shell">
       {/* Top Bar */}
@@ -138,7 +166,7 @@ export default function App() {
       {showReps && <div className="overlay" onClick={() => setShowReps(false)} />}
       {showReps && (
         <div className="dropdown">
-          {Object.values(REPS).map(r => {
+          {Object.values(repsData).map(r => {
             const p = Math.round((r.mtdSales / r.monthlyTarget) * 100);
             return (
               <div key={r.id} className={`drop-item ${r.id === repId ? 'selected' : ''}`}
