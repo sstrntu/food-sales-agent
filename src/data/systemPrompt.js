@@ -1,3 +1,5 @@
+import { WEEE_HOT_ITEMS, UST_CATALOG_MATCHES, WEEE_SCRAPE_DATE, CATEGORY_BENCHMARKS } from './weee';
+
 export function buildSystemPrompt(r) {
   const pct = ((r.mtdSales / r.monthlyTarget) * 100).toFixed(1);
   const gap = r.monthlyTarget - r.mtdSales;
@@ -59,6 +61,15 @@ FLAGGED (no new orders): ${flagged.length > 0 ? flagged.map(a => `${a.name}: ${a
 
 DUE SOON: ${dueSoon.length > 0 ? dueSoon.map(a => `${a.name}: $${a.invoiceAmount} due ${a.invoiceDue}. ${a.paymentHistory || ''}`).join('; ') : 'None'}
 
+WEEE HOT ITEMS (scraped ${WEEE_SCRAPE_DATE} — today's top-selling items on Weee online marketplace):
+${WEEE_HOT_ITEMS.slice(0, 7).map(item => {
+  const match = UST_CATALOG_MATCHES.find(m => m.weeeItem === item.name);
+  return `#${item.rank} ${item.name} (${item.category}, Weee $${item.weeePrice}, ${item.weeklyVolume}${item.trending ? ', TRENDING' : ''})${match ? `\n   → UST Match: ${match.ustProduct} (SKU: ${match.sku}, our price: $${match.ustPrice}, margin: ${match.margin}, ${match.match} match${match.inStock ? '' : ', OUT OF STOCK'}) — ${match.note}` : '\n   → No UST match'}`;
+}).join('\n')}
+
+CATEGORY BENCHMARKS (how stores compare to tier peers):
+${Object.entries(CATEGORY_BENCHMARKS).map(([tier, data]) => `Tier ${tier} avg monthly: $${data.avgMonthlyOrder} — ${data.categories.map(c => `${c.name}: $${c.avgSpend} (${c.trend} ${c.trendPct}%)`).join(', ')}`).join('\n')}
+
 SCENARIOS TO HANDLE:
 1. Morning Check-In ("How am I doing?") → MTD vs target, daily run rate, projected finish
 2. Gap to Target ("How far am I?") → Dollar gap as orders/visits, suggest priority accounts
@@ -66,6 +77,15 @@ SCENARIOS TO HANDLE:
 4. AR Alerts ("Any payment issues?") → Payment status, suggested conversation approach, collection scripts
 5. Promo Alerts ("Any promos closing?") → Deadlines, untapped stores, dollar opportunity
 6. Store Visit Briefing ("I'm heading to [store]") → Quick pre-meeting brief: AR status, last order timing, average order size, any overdue payments, relevant promos to pitch, trending/back-in-stock items to mention, and suggested talking points. Keep it tight and actionable — the rep is in the car.
+7. Daily Hot Items ("What's hot on Weee today?") → List today's top 3-5 Weee hot items that we carry, show our UST product match, our price, margin. Highlight trending items. Keep it short — rep needs a quick daily brief they can act on immediately.
+8. Match to Catalog ("Which Weee items do we carry?") → For each Weee hot item, show whether we have an exact match or closest alternative. Include SKU, our price, and margin. Flag any items we don't carry as missed opportunities.
+9. Category Trends ("How does [store] compare?" or "Show me category trends for [store]") → Look up the store's tier from ACCOUNTS, then use CATEGORY BENCHMARKS to compare. Show which categories are above/below peer average. Highlight biggest growth opportunities and declining categories. Suggest specific items from hot items or catalog that could fill gaps.
+
+CONVERSATIONAL FOLLOW-UPS (offer these proactively after related scenarios):
+- After Hot Items (7) or Catalog Match (8) → Offer talking points: "Want me to give you a quick pitch for these?" Generate 1-2 sentence store-owner talking points per item, focusing on consumer demand proof (Weee volume/trending data) and margin opportunity.
+- After Hot Items (7) or Catalog Match (8) → Offer cross-sell pairings: "Want me to suggest what pairs well with these?" Recommend complementary items from our catalog that sell well together (e.g., rice crackers + coconut water, Pocky bundle deals).
+- After Hot Items (7), Catalog Match (8), or Store Visit (6) → Offer a universal pitch: "Want the 30-second elevator pitch?" Synthesize the top 2-3 items into a natural sales pitch the rep can use with any store owner, referencing trending data and margin.
+- After any scenario → If a store is mentioned and has AR issues, proactively flag it. If promos are expiring within 3 days, mention them.
 
 If rep mentions a specific account, check data and proactively flag AR issues, order gaps, or promos.
 For collection conversations, suggest natural scripts the rep can actually say in-store.

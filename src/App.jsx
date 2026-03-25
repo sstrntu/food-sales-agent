@@ -19,6 +19,7 @@ export default function App() {
   const [view, setView] = useState("chat");
   const [tick, setTick] = useState(0);
   const [showStorePicker, setShowStorePicker] = useState(false);
+  const [storePickerMode, setStorePickerMode] = useState("visit");
 
   const historyRef = useRef([]);
   const rep = REPS[repId];
@@ -204,7 +205,7 @@ export default function App() {
           <div className="chip-scroll">
             {QUICK_PROMPTS.map((q, i) => (
               <button key={i} className="chip" onClick={() => {
-                if (q.needsStore) setShowStorePicker(true);
+                if (q.needsStore) { setStorePickerMode(q.storePrompt || "visit"); setShowStorePicker(true); }
                 else handleSend(q.text);
               }}>{q.label}</button>
             ))}
@@ -214,12 +215,16 @@ export default function App() {
           <>
             <div className="overlay" onClick={() => setShowStorePicker(false)} />
             <div className="store-picker">
-              <div className="store-picker-title">Where are you heading?</div>
+              <div className="store-picker-title">{storePickerMode === "trends" ? "Compare which store?" : "Where are you heading?"}</div>
               <div className="store-picker-list">
                 {rep.accounts.map((a, i) => (
                   <button key={i} className="store-picker-item" onClick={() => {
                     setShowStorePicker(false);
-                    handleSend(`I'm heading to ${a.name} now. Give me a quick briefing — what do I need to know before I walk in? Any AR issues, recent order history, items to push, or promos I should mention?`);
+                    if (storePickerMode === "trends") {
+                      handleSend(`How does ${a.name} compare to other stores in its tier? Show me their category trends — where are they ahead, where are they falling behind, and what should I push to close the gaps?`);
+                    } else {
+                      handleSend(`I'm heading to ${a.name} now. Give me a quick briefing — what do I need to know before I walk in? Any AR issues, recent order history, items to push, or promos I should mention?`);
+                    }
                   }}>
                     <div className="tier-badge">{a.tier}</div>
                     <div className="store-picker-info">

@@ -98,11 +98,34 @@ const IconVisit = () => (
   </svg>
 );
 
+const IconHot = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 2c0 3-4 5-4 8a5 5 0 0010 0c0-3-4-5-4-8z"/>
+    <path d="M10 18a2.5 2.5 0 002.5-2.5c0-1.5-2.5-3-2.5-3s-2.5 1.5-2.5 3A2.5 2.5 0 0010 18z"/>
+  </svg>
+);
+const IconCatalog = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 4h4l3 2h7v10H3V4z"/>
+    <path d="M8 12l2 2 4-4"/>
+  </svg>
+);
+
+const IconTrends = () => (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 16l4-5 3 3 7-9"/>
+    <path d="M14 5h3v3"/>
+  </svg>
+);
+
 const QUICK_PROMPTS = [
   { icon: IconCheckin, label: "Check-in", text: "Hey, how am I doing this month?" },
   { icon: IconGap, label: "My Gap", text: "How far am I from hitting my number?" },
-  { icon: IconPush, label: "What to Push", text: "What should I be pushing this week?" },
+  { icon: IconHot, label: "Hot Items", text: "What are today's top hot items on Weee that we should push across all stores?" },
   { icon: IconVisit, label: "Store Visit", text: null, needsStore: true },
+  { icon: IconCatalog, label: "Catalog Match", text: "Which of today's Weee hot items do we carry, or what's the closest US Trading alternative?" },
+  { icon: IconTrends, label: "Trends", text: null, needsStore: true, storePrompt: "trends" },
+  { icon: IconPush, label: "What to Push", text: "What should I be pushing this week?" },
   { icon: IconAR, label: "AR Issues", text: "Any payment issues I should know about?" },
   { icon: IconPromos, label: "Promos", text: "What promos are closing soon?" },
 ];
@@ -112,6 +135,7 @@ export { QUICK_PROMPTS };
 export default function ChatView({ rep, messages, thinking, error, onSend }) {
   const scrollRef = useRef(null);
   const [showStorePicker, setShowStorePicker] = useState(false);
+  const [storePickerMode, setStorePickerMode] = useState("visit"); // "visit" or "trends"
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -119,6 +143,7 @@ export default function ChatView({ rep, messages, thinking, error, onSend }) {
 
   const handleQuickPrompt = (q) => {
     if (q.needsStore) {
+      setStorePickerMode(q.storePrompt || "visit");
       setShowStorePicker(true);
     } else {
       onSend(q.text);
@@ -127,7 +152,11 @@ export default function ChatView({ rep, messages, thinking, error, onSend }) {
 
   const handleStorePick = (storeName) => {
     setShowStorePicker(false);
-    onSend(`I'm heading to ${storeName} now. Give me a quick briefing — what do I need to know before I walk in? Any AR issues, recent order history, items to push, or promos I should mention?`);
+    if (storePickerMode === "trends") {
+      onSend(`How does ${storeName} compare to other stores in its tier? Show me their category trends — where are they ahead, where are they falling behind, and what should I push to close the gaps?`);
+    } else {
+      onSend(`I'm heading to ${storeName} now. Give me a quick briefing — what do I need to know before I walk in? Any AR issues, recent order history, items to push, or promos I should mention?`);
+    }
   };
 
   if (messages.length === 0) {
