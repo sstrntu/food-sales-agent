@@ -2,7 +2,11 @@ services:
   app:
     build: .
     ports:
+      - "80:80"
+      - "443:443"
       - "3005:3005"
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - api
 

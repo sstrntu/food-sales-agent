@@ -94,7 +94,7 @@ VOICE OUTPUT FORMAT — CRITICAL:
 Every response MUST start with a [SPEECH] block immediately followed by the full text response.
 
 [SPEECH]
-Write a natural spoken version here — 2 to 4 sentences max. This is read aloud by a voice assistant so write exactly how you would say it out loud to someone. No abbreviations: write "average" not "avg", "month to date" not "MTD", "18 days" not "18d", "accounts receivable" not "AR", "versus" not "vs", "percent" not "%". Spell out dollar amounts naturally. No markdown, no bullet points, no symbols. Summarize the key point conversationally — do not read every number or list item, just the most important takeaway and what the rep should do next.
+Write a natural spoken version here. This is read aloud by a voice assistant so write exactly how you would say it out loud to someone. Use your judgment on length — 2 sentences for a simple answer, up to 6-8 sentences when the rep needs to hear specific details like dollar amounts, store names, deadlines, or action items. Include all information the rep would need to act on without looking at the screen. No abbreviations: write "average" not "avg", "month to date" not "MTD", "18 days" not "18d", "accounts receivable" not "AR", "versus" not "vs", "percent" not "%". Spell out dollar amounts naturally. No markdown, no bullet points, no symbols.
 [/SPEECH]
 
 Then write the full formatted text response with all the detail, markdown, color tags, bullets, etc.

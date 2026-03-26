@@ -42,10 +42,50 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
   const audioReadyRef = useRef(false); // sourceBuffer is ready to accept data
   const turnDoneRef = useRef(false);   // server signaled turn_end
   const hasAudioRef = useRef(false);   // received at least one audio chunk
+  const useFallbackAudioRef = useRef(false); // true when MSE not supported (mobile Safari)
+  const fallbackChunksRef = useRef([]); // collected base64 chunks for fallback playback
 
   function setStateSync(s) {
     stateRef.current = s;
     setState(s);
+  }
+
+  // ── Unlock audio on mobile (must be called from user gesture) ─────────────────
+
+  const unlockedAudioRef = useRef(null);
+
+  function unlockAudio() {
+    if (unlockedAudioRef.current) return;
+    try {
+      const audio = new Audio();
+      // Store ref immediately (synchronously within user gesture) so it's available for later reuse
+      unlockedAudioRef.current = audio;
+      audio.src = 'data:audio/mp3;base64,/+NIxAAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
+      audio.volume = 0;
+      audio.play().then(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        audio.src = '';
+        console.log('[Conv] Audio unlocked on mobile');
+      }).catch(e => {
+        console.warn('[Conv] Audio unlock failed:', e.message);
+      });
+      // Also unlock AudioContext (helps on some Android browsers)
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) {
+          const ctx = new AC();
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start();
+          if (ctx.state === 'suspended') ctx.resume();
+        }
+      } catch {}
+    } catch (e) {
+      console.warn('[Conv] Could not unlock audio:', e.message);
+    }
   }
 
   // ── MSE streaming audio ───────────────────────────────────────────────────────
@@ -63,6 +103,28 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
     // Clean up any previous instance
     cleanupAudio();
 
+    turnDoneRef.current = false;
+    hasAudioRef.current = false;
+    chunkQueueRef.current = [];
+    fallbackChunksRef.current = [];
+
+    // Check if MSE is supported (mobile Safari doesn't support it)
+    const mseSupported = typeof MediaSource !== 'undefined' &&
+      MediaSource.isTypeSupported && MediaSource.isTypeSupported('audio/mpeg');
+
+    // Detect mobile — prefer fallback on mobile even if MSE reports support,
+    // because MSE + autoplay is unreliable on mobile browsers
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    if (!mseSupported || isMobile) {
+      console.log(`[Conv] Using fallback audio (MSE=${mseSupported}, mobile=${isMobile})`);
+      useFallbackAudioRef.current = true;
+      audioReadyRef.current = true;
+      return;
+    }
+
+    useFallbackAudioRef.current = false;
+
     const mediaSource = new MediaSource();
     const audio = new Audio();
     audio.src = URL.createObjectURL(mediaSource);
@@ -70,10 +132,7 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
     mediaSourceRef.current = mediaSource;
     audioRef.current = audio;
     sourceBufferRef.current = null;
-    chunkQueueRef.current = [];
     audioReadyRef.current = false;
-    turnDoneRef.current = false;
-    hasAudioRef.current = false;
 
     mediaSource.addEventListener('sourceopen', () => {
       try {
@@ -98,7 +157,7 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
         flushQueue();
       } catch (e) {
         console.error('MSE init error:', e.message);
-        // Fallback: will be handled by turn_end with no audio
+        useFallbackAudioRef.current = true;
       }
     });
 
@@ -114,6 +173,18 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
 
   function appendAudioChunk(base64Data) {
     hasAudioRef.current = true;
+
+    // Fallback mode: collect chunks, play after turn ends
+    if (useFallbackAudioRef.current) {
+      fallbackChunksRef.current.push(base64Data);
+      if (fallbackChunksRef.current.length === 1) {
+        setStateSync('speaking');
+        stopListening();
+      }
+      return;
+    }
+
+    // MSE mode: stream audio in real time
     const buffer = base64ToArrayBuffer(base64Data);
 
     const sb = sourceBufferRef.current;
@@ -161,7 +232,8 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
   function cleanupAudio() {
     if (audioRef.current) {
       audioRef.current.pause();
-      if (audioRef.current.src) {
+      // Don't revoke/destroy the unlocked audio element — we reuse it
+      if (audioRef.current !== unlockedAudioRef.current && audioRef.current.src) {
         URL.revokeObjectURL(audioRef.current.src);
       }
       audioRef.current = null;
@@ -174,6 +246,7 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
     chunkQueueRef.current = [];
     audioReadyRef.current = false;
     hasAudioRef.current = false;
+    fallbackChunksRef.current = [];
   }
 
   function stopAudioPlayback() {
@@ -194,7 +267,7 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
 
   // ── Start a turn ──────────────────────────────────────────────────────────────
 
-  function startTurn(text) {
+  function startTurn(text, { voice = false } = {}) {
     const currentRep = repRef.current;
     if (!currentRep) {
       setError('Rep data not loaded yet');
@@ -206,22 +279,44 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
     fullTextRef.current = '';
     turnTextRef.current = '';
 
-    // Initialize streaming audio for this turn
-    initStreamingAudio();
+    // Only initialize audio when voice mode is active
+    if (voice) {
+      initStreamingAudio();
+    }
 
     historyRef.current.push({ role: 'user', content: text });
     onUserMessageRef.current?.(text);
 
     const systemPrompt = buildSystemPrompt(currentRep);
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+
+    function sendMessage() {
       wsRef.current.send(JSON.stringify({
         type: 'conversation_turn',
         systemPrompt,
         history: historyRef.current,
+        voice,
       }));
+    }
+
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      sendMessage();
     } else {
-      setError('Connection lost — reconnecting...');
-      setStateSync('listening');
+      // Auto-connect and send once open
+      connectWs();
+      const checkReady = setInterval(() => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          clearInterval(checkReady);
+          sendMessage();
+        }
+      }, 100);
+      // Timeout after 5s
+      setTimeout(() => {
+        clearInterval(checkReady);
+        if (wsRef.current?.readyState !== WebSocket.OPEN) {
+          setError('Could not connect — please try again');
+          setStateSync('idle');
+        }
+      }, 5000);
     }
   }
 
@@ -234,7 +329,78 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
 
     turnDoneRef.current = true;
 
-    // If sourceBuffer is idle and queue is empty, end the stream now
+    // Fallback mode: decode each base64 chunk separately, combine binary, play
+    if (useFallbackAudioRef.current && fallbackChunksRef.current.length > 0) {
+      // Decode each chunk individually (can't just concatenate base64 strings)
+      const decoded = fallbackChunksRef.current.map(b64 => {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes;
+      });
+      const totalLen = decoded.reduce((sum, b) => sum + b.length, 0);
+      const combined = new Uint8Array(totalLen);
+      let offset = 0;
+      for (const buf of decoded) {
+        combined.set(buf, offset);
+        offset += buf.length;
+      }
+      fallbackChunksRef.current = [];
+      console.log(`[Conv] Fallback audio: ${decoded.length} chunks, ${totalLen} bytes`);
+
+      const blob = new Blob([combined], { type: 'audio/mpeg' });
+      const blobUrl = URL.createObjectURL(blob);
+
+      // Reuse the unlocked audio element if available (mobile), else create new
+      const audio = unlockedAudioRef.current || new Audio();
+      audio.volume = 1.0;
+      audioRef.current = audio;
+
+      const onEnded = () => {
+        audio.removeEventListener('ended', onEnded);
+        audio.removeEventListener('error', onError);
+        URL.revokeObjectURL(blobUrl);
+        onAudioFinished();
+      };
+      const onError = () => {
+        console.warn('[Conv] Fallback audio error');
+        audio.removeEventListener('ended', onEnded);
+        audio.removeEventListener('error', onError);
+        URL.revokeObjectURL(blobUrl);
+        onAudioFinished();
+      };
+      audio.addEventListener('ended', onEnded);
+      audio.addEventListener('error', onError);
+      audio.src = blobUrl;
+      audio.play().then(() => {
+        console.log('[Conv] Fallback audio playing');
+      }).catch(err => {
+        console.warn('[Conv] Fallback audio play failed on unlocked element:', err.message);
+        // Retry with a fresh Audio element (some browsers allow it after page interaction)
+        audio.removeEventListener('ended', onEnded);
+        audio.removeEventListener('error', onError);
+        const retryAudio = new Audio(blobUrl);
+        retryAudio.volume = 1.0;
+        audioRef.current = retryAudio;
+        retryAudio.addEventListener('ended', () => {
+          URL.revokeObjectURL(blobUrl);
+          onAudioFinished();
+        });
+        retryAudio.addEventListener('error', () => {
+          console.warn('[Conv] Fallback audio retry also failed');
+          URL.revokeObjectURL(blobUrl);
+          onAudioFinished();
+        });
+        retryAudio.play().catch(err2 => {
+          console.warn('[Conv] Fallback audio retry play failed:', err2.message);
+          URL.revokeObjectURL(blobUrl);
+          onAudioFinished();
+        });
+      });
+      return;
+    }
+
+    // MSE mode: finalize the stream
     const sb = sourceBufferRef.current;
     const ms = mediaSourceRef.current;
     if (sb && !sb.updating && chunkQueueRef.current.length === 0 && ms?.readyState === 'open') {
@@ -311,7 +477,9 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
       }
     };
 
-    ws.onerror = () => {};
+    ws.onerror = (err) => {
+      console.error('[Conv] WebSocket error:', err);
+    };
     wsRef.current = ws;
   }
 
@@ -340,7 +508,7 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
         if (stateRef.current === 'speaking' || stateRef.current === 'processing') {
           bargeIn();
         }
-        startTurn(transcript);
+        startTurn(transcript, { voice: true });
       }
     };
 
@@ -373,6 +541,7 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
   const startConversation = useCallback(() => {
     activeRef.current = true;
     setError('');
+    unlockAudio(); // unlock audio playback on mobile (must be in user gesture)
     connectWs();
     setStateSync('listening');
     ensureListening();
@@ -409,7 +578,8 @@ export function useConversation({ rep, historyRef, onUserMessage, onAssistantChu
     if (stateRef.current === 'speaking' || stateRef.current === 'processing') {
       bargeIn();
     }
-    startTurn(text);
+    // Only use voice when conversation mode is active (mic on)
+    startTurn(text, { voice: activeRef.current });
   }, []);
 
   useEffect(() => {

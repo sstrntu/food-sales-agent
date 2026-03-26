@@ -209,8 +209,9 @@ wss.on('connection', (clientWs) => {
     elevenReady = true;
   }
 
-  async function handleTurn(systemPrompt, history, currentTurnId) {
-    console.log(`[WS] Turn ${currentTurnId} starting, history length: ${history.length}`);
+  async function handleTurn(systemPrompt, history, currentTurnId, voice = true) {
+    console.log(`[WS] Turn ${currentTurnId} starting, voice=${voice}, history length: ${history.length}`);
+    console.log(`[WS] User message: "${history[history.length - 1]?.content || 'unknown'}"`);
     claudeAbort = new AbortController();
 
     // 1. Start Claude streaming request
@@ -246,95 +247,103 @@ wss.on('connection', (clientWs) => {
       return;
     }
 
-    // 2. Open ElevenLabs WebSocket for streaming TTS
-    elevenReady = false;
-    pendingTextQueue = [];
-
-    elevenWs = new WebSocket(
-      `wss://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE}/stream-input?model_id=eleven_turbo_v2&output_format=mp3_44100_128`
-    );
-
-    elevenWs.on('open', () => {
-      console.log(`[WS] ElevenLabs WS opened for turn ${currentTurnId}, voice=${ELEVENLABS_VOICE}, key=${ELEVENLABS_KEY ? 'set(' + ELEVENLABS_KEY.slice(0,8) + '...)' : 'MISSING'}`);
-      // Send BOS (beginning of stream)
-      const bos = {
-        text: ' ',
-        voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.3 },
-        xi_api_key: ELEVENLABS_KEY,
-      };
-      elevenWs.send(JSON.stringify(bos));
-      flushPendingText();
-    });
-
+    // 2. Open ElevenLabs WebSocket for streaming TTS (only in voice mode)
     let audioChunkCount = 0;
-    elevenWs.on('message', (data) => {
-      if (currentTurnId !== turnId) return;
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg.audio) {
-          audioChunkCount++;
-          sendToClient({ type: 'audio', data: msg.audio });
-        }
-        if (msg.error) {
-          console.error('[WS] ElevenLabs message error:', JSON.stringify(msg));
-        }
-        if (msg.message) {
-          console.log('[WS] ElevenLabs message:', msg.message);
-        }
-      } catch {
-        if (Buffer.isBuffer(data) && data.length > 0) {
-          audioChunkCount++;
-          sendToClient({ type: 'audio', data: data.toString('base64') });
-        }
-      }
-    });
+    let elevenClosed = !voice; // treat as already closed if no voice
+    let elevenClosePromise = Promise.resolve();
 
-    elevenWs.on('error', (err) => {
-      console.error('[WS] ElevenLabs WS error:', err.message);
-    });
+    if (voice) {
+      elevenReady = false;
+      pendingTextQueue = [];
 
-    let elevenClosed = false;
-    const elevenClosePromise = new Promise(resolve => {
-      elevenWs.on('close', (code, reason) => {
-        console.log(`[WS] ElevenLabs WS closed (code=${code}, reason=${reason?.toString() || 'none'}), sent ${audioChunkCount} audio chunks`);
-        elevenClosed = true;
-        resolve();
+      elevenWs = new WebSocket(
+        `wss://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE}/stream-input?model_id=eleven_turbo_v2&output_format=mp3_44100_128`
+      );
+
+      elevenWs.on('open', () => {
+        console.log(`[WS] ElevenLabs WS opened for turn ${currentTurnId}`);
+        const bos = {
+          text: ' ',
+          voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.3 },
+          xi_api_key: ELEVENLABS_KEY,
+        };
+        elevenWs.send(JSON.stringify(bos));
+        flushPendingText();
       });
-    });
+
+      elevenWs.on('message', (data) => {
+        if (currentTurnId !== turnId) return;
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.audio) {
+            audioChunkCount++;
+            if (audioChunkCount % 10 === 0) console.log(`[WS] ElevenLabs audio chunks sent: ${audioChunkCount}`);
+            sendToClient({ type: 'audio', data: msg.audio });
+          }
+          if (msg.error) console.error('[WS] ElevenLabs message error:', JSON.stringify(msg));
+          if (msg.message) console.log('[WS] ElevenLabs message:', msg.message);
+        } catch {
+          if (Buffer.isBuffer(data) && data.length > 0) {
+            audioChunkCount++;
+            sendToClient({ type: 'audio', data: data.toString('base64') });
+          }
+        }
+      });
+
+      elevenWs.on('error', (err) => {
+        console.error('[WS] ElevenLabs WS error:', err.message);
+      });
+
+      elevenClosePromise = new Promise(resolve => {
+        elevenWs.on('close', (code, reason) => {
+          console.log(`[WS] ElevenLabs WS closed (code=${code}), sent ${audioChunkCount} audio chunks`);
+          elevenClosed = true;
+          resolve();
+        });
+      });
+    } else {
+      console.log(`[WS] Text-only mode — skipping ElevenLabs TTS`);
+    }
 
     // 3. Parse Claude stream — extract [SPEECH]...[/SPEECH] for TTS, rest goes to display
-    let ttsSentenceBuffer = '';   // sentence accumulator for ElevenLabs
-    let fullText = '';            // display text (no SPEECH block)
-    let speechBuf = '';           // buffer while waiting for [/SPEECH]
-    let speechMode = true;        // true = still inside/waiting for SPEECH block
+    let ttsSentenceBuffer = '';
+    let fullText = '';
+    let speechBuf = '';
+    let speechMode = true;
 
     const SPEECH_START = '[SPEECH]';
     const SPEECH_END = '[/SPEECH]';
 
     try {
+      let deltaCount = 0;
       for await (const textDelta of parseAnthropicSSE(claudeRes.body)) {
-        if (currentTurnId !== turnId) break;
+        if (currentTurnId !== turnId) {
+          console.log(`[WS] Turn ${currentTurnId} aborted (newer turn ${turnId} started)`);
+          break;
+        }
+
+        deltaCount++;
+        if (deltaCount % 10 === 0) console.log(`[WS] Claude streaming... ${deltaCount} deltas`);
 
         if (speechMode) {
-          // Buffer until we find [/SPEECH]
           speechBuf += textDelta;
           const endIdx = speechBuf.indexOf(SPEECH_END);
 
           if (endIdx !== -1) {
-            // Found the end of the SPEECH block — extract its content
             speechMode = false;
             const startIdx = speechBuf.indexOf(SPEECH_START);
             const speechContent = startIdx !== -1
               ? speechBuf.slice(startIdx + SPEECH_START.length, endIdx)
               : speechBuf.slice(0, endIdx);
 
-            // Queue speech content for TTS (sentence by sentence)
-            ttsSentenceBuffer += speechContent;
-            const { sentences, remainder } = extractSentences(ttsSentenceBuffer);
-            ttsSentenceBuffer = remainder;
-            for (const s of sentences) sendTextToEleven(s);
+            if (voice) {
+              console.log(`[WS] Found SPEECH block, length=${speechContent.length}`);
+              ttsSentenceBuffer += speechContent;
+              const { sentences, remainder } = extractSentences(ttsSentenceBuffer);
+              ttsSentenceBuffer = remainder;
+              for (const s of sentences) sendTextToEleven(s);
+            }
 
-            // Anything after [/SPEECH] on this chunk is display text
             const afterSpeech = speechBuf.slice(endIdx + SPEECH_END.length).replace(/^\n/, '');
             if (afterSpeech) {
               fullText += afterSpeech;
@@ -342,47 +351,50 @@ wss.on('connection', (clientWs) => {
             }
             speechBuf = '';
           }
-          // else: keep buffering — don't send anything to client or TTS yet
         } else {
-          // Display mode — send to client, skip TTS
           fullText += textDelta;
           sendToClient({ type: 'text', chunk: textDelta });
         }
       }
+      console.log(`[WS] Claude streaming done (${deltaCount} deltas)`);
     } catch (err) {
       if (err.name !== 'AbortError') {
+        console.error(`[WS] Claude streaming error: ${err.message}`);
         sendToClient({ type: 'error', message: err.message });
       }
     }
 
     if (currentTurnId !== turnId) return;
 
-    // Fallback: no [SPEECH] block found — treat buffered content as both display + TTS
+    // Fallback: no [SPEECH] block found — treat buffered content as display (+ TTS if voice)
     if (speechMode && speechBuf) {
       fullText += speechBuf;
       sendToClient({ type: 'text', chunk: speechBuf });
-      ttsSentenceBuffer += speechBuf;
+      if (voice) ttsSentenceBuffer += speechBuf;
     }
 
-    // 4. Flush remaining TTS sentence buffer
-    if (ttsSentenceBuffer.trim()) {
+    // 4. Flush remaining TTS sentence buffer (voice only)
+    if (voice && ttsSentenceBuffer.trim()) {
       sendTextToEleven(ttsSentenceBuffer);
     }
 
-    // 5. Send EOS to ElevenLabs
-    if (elevenWs?.readyState === WebSocket.OPEN) {
+    // 5. Send EOS to ElevenLabs (voice only)
+    if (voice && elevenWs?.readyState === WebSocket.OPEN) {
       elevenWs.send(JSON.stringify({ text: '' }));
     }
 
     // 6. Send full text to client
     sendToClient({ type: 'text_done', fullText });
 
-    // 7. Wait for ElevenLabs to finish sending audio, then signal turn end
+    // 7. Wait for ElevenLabs to finish (voice only), then signal turn end
     if (!elevenClosed) {
-      await elevenClosePromise;
+      console.log(`[WS] Turn ${currentTurnId} waiting for ElevenLabs to close`);
+      const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000));
+      await Promise.race([elevenClosePromise, timeoutPromise]);
     }
 
     if (currentTurnId === turnId) {
+      console.log(`[WS] Turn ${currentTurnId} sending turn_end to client`);
       sendToClient({ type: 'turn_end', turnId: currentTurnId });
     }
 
@@ -392,12 +404,17 @@ wss.on('connection', (clientWs) => {
 
   clientWs.on('message', (raw) => {
     let msg;
-    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    try { msg = JSON.parse(raw.toString()); } catch {
+      console.log(`[WS] Unparseable message (${raw.toString().length} bytes)`);
+      return;
+    }
+
+    console.log(`[WS] Received message type="${msg.type}" (${raw.toString().length} bytes)`);
 
     if (msg.type === 'conversation_turn') {
       turnId++;
       cleanup();
-      handleTurn(msg.systemPrompt, msg.history, turnId);
+      handleTurn(msg.systemPrompt, msg.history, turnId, msg.voice !== false);
     }
 
     if (msg.type === 'interrupt') {
@@ -407,8 +424,9 @@ wss.on('connection', (clientWs) => {
     }
   });
 
-  clientWs.on('close', () => { cleanup(); });
-  clientWs.on('error', () => { cleanup(); });
+  clientWs.on('close', () => { console.log('[WS] Client disconnected'); cleanup(); });
+  clientWs.on('error', (err) => { console.error('[WS] Client error:', err.message); cleanup(); });
+
 });
 
 server.listen(3001, () => console.log('API server listening on :3001 (HTTP + WS)'));
