@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { loadReps } from './data/reps';
-import { callClaude, isKeyConfigured } from './services/claude';
-import { speak, stopSpeaking, isVoiceConfigured } from './services/elevenlabs';
-import { useSpeechRecognition } from './hooks/useSpeechRecognition';
+import { useConversation } from './hooks/useConversation';
 import Dashboard from './components/Dashboard';
 import ChatView, { QUICK_PROMPTS } from './components/ChatView';
 import './styles.css';
@@ -12,20 +10,18 @@ export default function App() {
   const [repsData, setRepsData] = useState(null);
   const [dataLoading, setDataLoading] = useState(true);
   const [messages, setMessages] = useState([]);
-  const [speaking_, setSpeaking] = useState(false);
-  const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
   const [showReps, setShowReps] = useState(false);
-  const usedMicRef = useRef(false);
   const [error, setError] = useState("");
   const [view, setView] = useState("chat");
   const [tick, setTick] = useState(0);
   const [showStorePicker, setShowStorePicker] = useState(false);
   const [storePickerMode, setStorePickerMode] = useState("visit");
+  const [convActive, setConvActive] = useState(false);
+  const [streamingText, setStreamingText] = useState(null);
 
   const historyRef = useRef([]);
 
-  // Load all rep data from Supabase on mount
   useEffect(() => {
     loadReps()
       .then(data => { setRepsData(data); setDataLoading(false); })
@@ -36,72 +32,82 @@ export default function App() {
   const gap = rep ? rep.monthlyTarget - rep.mtdSales : 0;
   const pct = rep ? Math.round((rep.mtdSales / rep.monthlyTarget) * 100) : 0;
 
-  // Reset on rep switch
   useEffect(() => {
     setMessages([]);
     historyRef.current = [];
     setError("");
+    setStreamingText(null);
   }, [repId]);
 
-  // Send message handler
-  const handleSend = useCallback(async (text) => {
+  // ── Conversation callbacks ────────────────────────────────────────────────────
+
+  const handleConvUserMessage = useCallback((text) => {
+    setMessages(prev => [...prev, { role: "user", text }]);
+    setStreamingText('');
+  }, []);
+
+  const handleConvChunk = useCallback((accumulatedText) => {
+    setStreamingText(accumulatedText);
+  }, []);
+
+  const handleConvDone = useCallback((fullText) => {
+    setStreamingText(null);
+    setMessages(prev => [...prev, { role: "assistant", text: fullText }]);
+  }, []);
+
+  const conversation = useConversation({
+    rep,
+    historyRef,
+    onUserMessage: handleConvUserMessage,
+    onAssistantChunk: handleConvChunk,
+    onAssistantDone: handleConvDone,
+  });
+
+  // ── Send (typed input or quick prompts) ──────────────────────────────────────
+
+  const handleSend = useCallback((text) => {
     const msg = text || input.trim();
     if (!msg) return;
-    const shouldSpeak = usedMicRef.current;
-    usedMicRef.current = false;
     setInput("");
-    setError("");
-    setMessages(prev => [...prev, { role: "user", text: msg }]);
-    setThinking(true);
+    conversation.sendText(msg);
+  }, [input, conversation]);
 
-    historyRef.current.push({ role: "user", content: msg });
+  // ── Mic button = conversation toggle ─────────────────────────────────────────
 
-    try {
-      const reply = await callClaude(rep, historyRef.current);
-      historyRef.current.push({ role: "assistant", content: reply });
-      setMessages(prev => [...prev, { role: "assistant", text: reply }]);
-      setThinking(false);
-
-      // TTS only when input was via mic
-      if (shouldSpeak) {
-        const audio = await speak(reply);
-        if (audio) {
-          setSpeaking(true);
-          audio.onended = () => setSpeaking(false);
-          audio.onerror = () => setSpeaking(false);
-          audio.play();
-        }
-      }
-    } catch (err) {
-      setThinking(false);
-      setError(err.message);
-      setMessages(prev => [...prev, { role: "assistant", text: "Having trouble connecting. Check API configuration." }]);
+  const toggleConversation = useCallback(() => {
+    if (convActive) {
+      conversation.stopConversation();
+      setConvActive(false);
+    } else {
+      conversation.startConversation();
+      setConvActive(true);
     }
-  }, [input, rep]);
+  }, [convActive, conversation]);
 
-  // Speech recognition — flag mic usage so TTS activates for the response
-  const handleMicResult = useCallback((text) => {
-    usedMicRef.current = true;
-    handleSend(text);
-  }, [handleSend]);
-  const { listening, error: micError, start: startListening, stop: stopListening } = useSpeechRecognition(handleMicResult);
+  const { state: convState, error: convError, muted: convMuted } = conversation;
+  const isListening = convState === 'listening';
+  const isSpeaking = convState === 'speaking';
+  const isThinking = convState === 'processing';
+  const activeError = convError || error;
 
-  // Pulse animation for mic
+  // Pulse animation
   useEffect(() => {
-    if (listening || speaking_) {
+    if (isListening || isSpeaking || isThinking) {
       const i = setInterval(() => setTick(t => t + 1), 60);
       return () => clearInterval(i);
     }
-  }, [listening, speaking_]);
+  }, [isListening, isSpeaking, isThinking]);
 
-  useEffect(() => {
-    if (micError) setError(micError);
-  }, [micError]);
-
-  // Pulse value for animations
   const pulseMag = Math.sin(tick * 0.1) * 0.5 + 0.5;
 
-  // Loading screen while Supabase data loads
+  const hintText = convActive
+    ? (convMuted ? "Muted — tap mic icon to unmute"
+      : isListening ? "Listening — speak anytime..."
+      : isSpeaking ? "Speaking — tap mic to stop"
+      : isThinking ? "Thinking..."
+      : "Tap mic to start talking")
+    : "Tap mic to start conversation";
+
   if (dataLoading || !rep) {
     return (
       <div className="shell" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -134,7 +140,10 @@ export default function App() {
           </svg>
         </div>
         {messages.length > 0 && (
-          <button className="new-chat-btn" onClick={() => { setMessages([]); historyRef.current = []; setError(""); stopSpeaking(); setSpeaking(false); setView('chat'); }}>
+          <button className="new-chat-btn" onClick={() => {
+            setMessages([]); historyRef.current = []; setError(""); setStreamingText(null);
+            conversation.stopConversation(); setConvActive(false); setView('chat');
+          }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M13.5 2.5l-11 11M8 2.5h5.5V8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
@@ -221,9 +230,10 @@ export default function App() {
         <ChatView
           rep={rep}
           messages={messages}
-          thinking={thinking}
-          error={error}
+          thinking={isThinking}
+          error={activeError}
           onSend={handleSend}
+          streamingText={streamingText}
         />
       )}
 
@@ -274,38 +284,72 @@ export default function App() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder="Ask about your targets, accounts, promos..."
-            disabled={thinking}
+            placeholder="Type or tap mic to speak..."
+            disabled={isThinking}
           />
+          {convActive && !input.trim() && (
+            <button
+              className={`mute-btn ${convMuted ? 'muted' : ''}`}
+              onClick={() => convMuted ? conversation.unmuteMic() : conversation.muteMic()}
+              title={convMuted ? 'Unmute mic' : 'Mute mic'}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <rect x="7" y="2" width="6" height="10" rx="3" fill="currentColor"/>
+                <path d="M4.5 9.5a5.5 5.5 0 0011 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+                <line x1="10" y1="15" x2="10" y2="18" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+                <line x1="2" y1="2" x2="18" y2="18" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"/>
+              </svg>
+            </button>
+          )}
           {input.trim() ? (
-            <button className="send-btn" onClick={() => handleSend()} disabled={thinking}>
+            <button className="send-btn" onClick={() => handleSend()} disabled={isThinking}>
               <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                 <path d="M3 9h12M11 5l4 4-4 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
           ) : (
             <button
-              className={`mic-btn ${listening ? 'listening' : ''} ${speaking_ ? 'speaking' : ''}`}
+              className={`mic-btn ${convActive ? 'conv-mode' : ''} ${isListening && !convMuted ? 'listening' : ''} ${isSpeaking ? 'speaking' : ''} ${convMuted ? 'muted' : ''}`}
               style={{
-                boxShadow: listening
-                  ? `0 0 ${12 + pulseMag * 16}px rgba(239,68,68,.4)`
-                  : speaking_
-                  ? `0 0 ${12 + pulseMag * 16}px rgba(129,140,248,.35)`
+                boxShadow: convActive
+                  ? (isSpeaking
+                    ? `0 0 ${12 + pulseMag * 16}px rgba(129,140,248,.35)`
+                    : isListening
+                    ? `0 0 ${12 + pulseMag * 16}px rgba(52,211,153,.4)`
+                    : isThinking
+                    ? `0 0 ${12 + pulseMag * 10}px rgba(251,191,36,.3)`
+                    : `0 0 12px rgba(52,211,153,.3)`)
                   : '0 4px 14px rgba(99,102,241,.35)',
-                transform: (listening || speaking_) ? `scale(${1 + pulseMag * .04})` : 'scale(1)',
+                transform: (isListening || isSpeaking || isThinking) ? `scale(${1 + pulseMag * .04})` : 'scale(1)',
+                background: convActive
+                  ? (isSpeaking ? 'linear-gradient(135deg, #818cf8, #6366f1)'
+                    : isThinking ? 'linear-gradient(135deg, #fbbf24, #f59e0b)'
+                    : 'linear-gradient(135deg, #34d399, #10b981)')
+                  : undefined,
               }}
-              onClick={() => {
-                if (speaking_) { stopSpeaking(); setSpeaking(false); }
-                else if (listening) stopListening();
-                else startListening();
-              }}
-              disabled={thinking}
+              onClick={toggleConversation}
             >
-              {speaking_ ? (
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <rect x="4" y="4" width="4.5" height="12" rx="1.2" fill="white"/>
-                  <rect x="11.5" y="4" width="4.5" height="12" rx="1.2" fill="white"/>
-                </svg>
+              {convActive ? (
+                isSpeaking ? (
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <rect x="3" y="7" width="2" height="6" rx="1" fill="white"><animate attributeName="height" values="6;10;6" dur="0.8s" repeatCount="indefinite"/><animate attributeName="y" values="7;5;7" dur="0.8s" repeatCount="indefinite"/></rect>
+                    <rect x="7" y="5" width="2" height="10" rx="1" fill="white"><animate attributeName="height" values="10;4;10" dur="0.6s" repeatCount="indefinite"/><animate attributeName="y" values="5;8;5" dur="0.6s" repeatCount="indefinite"/></rect>
+                    <rect x="11" y="6" width="2" height="8" rx="1" fill="white"><animate attributeName="height" values="8;12;8" dur="0.7s" repeatCount="indefinite"/><animate attributeName="y" values="6;4;6" dur="0.7s" repeatCount="indefinite"/></rect>
+                    <rect x="15" y="7" width="2" height="6" rx="1" fill="white"><animate attributeName="height" values="6;9;6" dur="0.9s" repeatCount="indefinite"/><animate attributeName="y" values="7;5.5;7" dur="0.9s" repeatCount="indefinite"/></rect>
+                  </svg>
+                ) : isThinking ? (
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <circle cx="5" cy="10" r="2" fill="white"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0s"/></circle>
+                    <circle cx="10" cy="10" r="2" fill="white"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0.2s"/></circle>
+                    <circle cx="15" cy="10" r="2" fill="white"><animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0.4s"/></circle>
+                  </svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <rect x="7" y="2" width="6" height="10" rx="3" fill="white"/>
+                    <path d="M4.5 9.5a5.5 5.5 0 0011 0" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+                    <line x1="10" y1="15" x2="10" y2="18" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+                  </svg>
+                )
               ) : (
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                   <rect x="7" y="2" width="6" height="10" rx="3" fill="white"/>
@@ -316,9 +360,7 @@ export default function App() {
             </button>
           )}
         </div>
-        <div className="hint">
-          {listening ? "Listening..." : speaking_ ? "Speaking — tap to stop" : thinking ? "Thinking..." : !isKeyConfigured() ? "API key needed" : ""}
-        </div>
+        <div className="hint">{hintText}</div>
       </div>
     </div>
   );

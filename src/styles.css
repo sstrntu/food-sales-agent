@@ -424,3 +424,50 @@
   50% { opacity: 0.8; transform: scale(1.15); }
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ---- Conversation Mode Toggle ---- */
+.conv-toggle {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 1.5px solid var(--glass-border); background: var(--bg-raised);
+  color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .2s ease; flex-shrink: 0;
+}
+.conv-toggle:hover { background: var(--accent-glow); color: var(--text-secondary); }
+.conv-toggle.active {
+  background: #10b981; border-color: #10b981; color: white;
+  box-shadow: 0 0 12px rgba(16,185,129,.3);
+}
+
+/* ---- Streaming cursor ---- */
+.stream-cursor {
+  display: inline-block; width: 2px; height: 14px;
+  background: var(--text-muted); margin-left: 2px;
+  vertical-align: text-bottom; border-radius: 1px;
+  animation: cursorBlink 0.8s ease-in-out infinite;
+}
+@keyframes cursorBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+.bubble.streaming { border: 1px solid rgba(16,185,129,.2); }
+
+/* ---- Conversation mode mic overrides ---- */
+.mic-btn.conv-mode {
+  background: linear-gradient(135deg, #34d399, #10b981);
+}
+.mic-btn.conv-mode::before { border-color: rgba(16,185,129,.2); }
+.mic-btn.conv-mode.muted {
+  background: linear-gradient(135deg, #4b5563, #374151);
+  box-shadow: none;
+}
+.mic-btn.conv-mode.muted::before { border-color: rgba(255,255,255,.08); }
+
+/* ---- Mute button ---- */
+.mute-btn {
+  width: 50px; height: 50px; border-radius: var(--radius-lg); border: none;
+  background: transparent; color: #1a1a1f;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: color .2s, transform .15s;
+  flex-shrink: 0;
+}
+.mute-btn:active { transform: scale(0.94); }
+.mute-btn.muted { color: #ef4444; }

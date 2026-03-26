@@ -132,14 +132,14 @@ const QUICK_PROMPTS = [
 
 export { QUICK_PROMPTS };
 
-export default function ChatView({ rep, messages, thinking, error, onSend }) {
+export default function ChatView({ rep, messages, thinking, error, onSend, streamingText }) {
   const scrollRef = useRef(null);
   const [showStorePicker, setShowStorePicker] = useState(false);
   const [storePickerMode, setStorePickerMode] = useState("visit"); // "visit" or "trends"
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, thinking]);
+  }, [messages, thinking, streamingText]);
 
   const handleQuickPrompt = (q) => {
     if (q.needsStore) {
@@ -226,7 +226,16 @@ export default function ChatView({ rep, messages, thinking, error, onSend }) {
           </div>
         </div>
       ))}
-      {thinking && (
+      {streamingText != null && streamingText.length > 0 && (
+        <div className="msg-row assistant">
+          <div className="ai-dot">AI</div>
+          <div className="bubble assistant streaming">
+            {renderMarkdown(streamingText)}
+            <span className="stream-cursor" />
+          </div>
+        </div>
+      )}
+      {thinking && !streamingText && (
         <div className="msg-row assistant">
           <div className="ai-dot">AI</div>
           <div className="bubble assistant">
